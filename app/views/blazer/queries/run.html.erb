@@ -98,7 +98,13 @@
           } catch (e) {
           }
 
-          var featureLayer = L.geoJSON(geojson).addTo(map);
+          var featureLayer = L.geoJSON(geojson,{
+              style: function (feature) {
+                return {color: feature.properties['marker-color']};
+            }).bindPopup(function (layer) {
+              return layer.feature.properties.description;
+            }).addTo(map);
+
         <% end %>
 
         map.fitBounds(featureLayer.getBounds());

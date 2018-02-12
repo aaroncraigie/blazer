@@ -36,7 +36,7 @@ module Blazer
       ENV["MAPBOX_ACCESS_TOKEN"].present?
     end
 
-    def blazer_maquest_maps?
+    def blazer_mapquest_maps?
       ENV["MAPQUEST_ACCESS_TOKEN"].present?
     end
 

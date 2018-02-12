@@ -101,7 +101,7 @@
           var featureLayer = L.geoJSON(geojson,{
               style: function (feature) {
                 return {color: feature.properties['marker-color']};
-            }).bindPopup(function (layer) {
+            }}).bindPopup(function (layer) {
               return layer.feature.properties.description;
             }).addTo(map);
 

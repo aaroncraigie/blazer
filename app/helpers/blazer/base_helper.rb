@@ -29,7 +29,7 @@ module Blazer
     end
 
     def blazer_maps? 
-      blazer_mapbox_maps? || blazer_maquest_maps?
+      blazer_mapbox_maps? || blazer_mapquest_maps?
     end
 
     def blazer_mapbox_maps?

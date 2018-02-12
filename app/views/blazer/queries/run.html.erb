@@ -49,10 +49,8 @@
     <% if blazer_maps? && @markers.any? %>
       <div id="map" style="height: <%= @only_chart ? 300 : 500 %>px;"></div>
       <script>
-        L.mapbox.accessToken = '<%= ENV["MAPBOX_ACCESS_TOKEN"] %>';
-        var map = L.mapbox.map('map', 'ankane.ioo8nki0');
+
         <%= blazer_js_var "markers", @markers %>
-        var featureLayer = L.mapbox.featureLayer().addTo(map);
         var geojson = [];
         for (var i = 0; i < markers.length; i++) {
           var marker = markers[i];
@@ -72,8 +70,39 @@
             }
           });
         }
-        featureLayer.setGeoJSON(geojson);
+
+        <% if blazer_mapbox_maps? %>
+          L.mapbox.accessToken = '<%= ENV["MAPBOX_ACCESS_TOKEN"] %>';
+          var map = L.mapbox.map('map', 'ankane.ioo8nki0');
+          var featureLayer = L.mapbox.featureLayer().addTo(map);
+          featureLayer.setGeoJSON(geojson);
+        <% end %>
+
+        <% if blazer_mapquest_maps? %>
+          var mapLayer = null;
+          try {
+            mapLayer = MQ.mapLayer();
+          } catch (e) {
+          }
+
+          var map = L.map('map', { layers: mapLayer });
+
+          try {
+            L.control.layers({
+              'Map': mapLayer,
+              'Hybrid': MQ.hybridLayer(),
+              'Satellite': MQ.satelliteLayer(),
+              'Dark': MQ.darkLayer(),
+              'Light': MQ.lightLayer()
+            }).addTo(map);
+          } catch (e) {
+          }
+
+          var featureLayer = L.geoJSON(geojson).addTo(map);
+        <% end %>
+
         map.fitBounds(featureLayer.getBounds());
+
       </script>
     <% elsif chart_type == "line" %>
       <%= line_chart @columns[1..-1].each_with_index.map{ |k, i| {name: blazer_series_name(k), data: @rows.map{ |r| [r[0], r[i + 1]] }, library: series_library[i]} }, chart_options %>

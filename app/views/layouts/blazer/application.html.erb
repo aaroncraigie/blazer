@@ -10,10 +10,15 @@
     <script>
       <%= blazer_js_var "rootPath", root_path %>
     </script>
-    <% if blazer_maps? %>
+    <% if blazer_mapbox_maps? %>
       <%= stylesheet_link_tag "https://api.mapbox.com/mapbox.js/v2.4.0/mapbox.css" %>
       <%= javascript_include_tag "https://api.mapbox.com/mapbox.js/v2.4.0/mapbox.js" %>
     <% end %>
+
+    <% if blazer_mapquest_maps? %>
+      <%= javascript_include_tag 'https://www.mapquestapi.com/sdk/leaflet/v2.2/mq-map.js?key=<%= ENV["MAPQUEST_ACCESS_TOKEN"]%>' %>
+    <% end %>
+
     <%= csrf_meta_tags %>
   </head>
   <body>

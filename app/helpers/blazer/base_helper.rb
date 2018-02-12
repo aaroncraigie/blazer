@@ -28,8 +28,16 @@ module Blazer
       end
     end
 
-    def blazer_maps?
+    def blazer_maps? 
+      blazer_mapbox_maps? || blazer_maquest_maps?
+    end
+
+    def blazer_mapbox_maps?
       ENV["MAPBOX_ACCESS_TOKEN"].present?
+    end
+
+    def blazer_maquest_maps?
+      ENV["MAPQUEST_ACCESS_TOKEN"].present?
     end
 
     def blazer_js_var(name, value)

@@ -1,11 +1,16 @@
+# dependencies
 require "csv"
 require "yaml"
 require "chartkick"
 require "safely/core"
+
+# modules
 require "blazer/version"
 require "blazer/data_source"
 require "blazer/result"
 require "blazer/run_statement"
+
+# adapters
 require "blazer/adapters/base_adapter"
 require "blazer/adapters/athena_adapter"
 require "blazer/adapters/bigquery_adapter"
@@ -16,6 +21,9 @@ require "blazer/adapters/elasticsearch_adapter"
 require "blazer/adapters/mongodb_adapter"
 require "blazer/adapters/presto_adapter"
 require "blazer/adapters/sql_adapter"
+require "blazer/adapters/snowflake_adapter"
+
+# engine
 require "blazer/engine"
 
 module Blazer
@@ -26,24 +34,31 @@ module Blazer
     attr_accessor :audit
     attr_reader :time_zone
     attr_accessor :user_name
-    attr_accessor :user_class
-    attr_accessor :user_method
+    attr_writer :user_class
+    attr_writer :user_method
     attr_accessor :before_action
     attr_accessor :from_email
     attr_accessor :cache
     attr_accessor :transform_statement
+    attr_accessor :transform_variable
     attr_accessor :check_schedules
     attr_accessor :anomaly_checks
+    attr_accessor :forecasting
     attr_accessor :async
     attr_accessor :images
+    attr_accessor :query_viewable
     attr_accessor :query_editable
+    attr_accessor :override_csp
+    attr_accessor :slack_webhook_url
   end
   self.audit = true
   self.user_name = :name
   self.check_schedules = ["5 minutes", "1 hour", "1 day"]
   self.anomaly_checks = false
+  self.forecasting = false
   self.async = false
   self.images = false
+  self.override_csp = false
 
   TIMEOUT_MESSAGE = "Query timed out :("
   TIMEOUT_ERRORS = [
@@ -61,6 +76,23 @@ module Blazer
     @time_zone = time_zone.is_a?(ActiveSupport::TimeZone) ? time_zone : ActiveSupport::TimeZone[time_zone.to_s]
   end
 
+  def self.user_class
+    if !defined?(@user_class)
+      @user_class = settings.key?("user_class") ? settings["user_class"] : (User.name rescue nil)
+    end
+    @user_class
+  end
+
+  def self.user_method
+    if !defined?(@user_method)
+      @user_method = settings["user_method"]
+      if user_class
+        @user_method ||= "current_#{user_class.to_s.downcase.singularize}"
+      end
+    end
+    @user_method
+  end
+
   def self.settings
     @settings ||= begin
       path = Rails.root.join("config", "blazer.yml").to_s
@@ -74,20 +106,11 @@ module Blazer
 
   def self.data_sources
     @data_sources ||= begin
-      ds = Hash[
-        settings["data_sources"].map do |id, s|
-          [id, Blazer::DataSource.new(id, s)]
-        end
-      ]
-      ds.default = ds.values.first
+      ds = Hash.new { |hash, key| raise Blazer::Error, "Unknown data source: #{key}" }
+      settings["data_sources"].each do |id, s|
+        ds[id] = Blazer::DataSource.new(id, s)
+      end
       ds
-
-      # TODO Blazer 2.0
-      # ds2 = Hash.new { |hash, key| raise Blazer::Error, "Unknown data source: #{key}" }
-      # ds.each do |k, v|
-      #   ds2[k] = v
-      # end
-      # ds2
     end
   end
 
@@ -107,8 +130,6 @@ module Blazer
   end
 
   def self.run_check(check)
-    rows = nil
-    error = nil
     tries = 1
 
     ActiveSupport::Notifications.instrument("run_check.blazer", check_id: check.id, query_id: check.query.id, state_was: check.state) do |instrument|
@@ -154,9 +175,14 @@ module Blazer
 
   def self.send_failing_checks
     emails = {}
+    slack_channels = {}
+
     Blazer::Check.includes(:query).where(state: ["failing", "error", "timed out", "disabled"]).find_each do |check|
       check.split_emails.each do |email|
         (emails[email] ||= []) << check
+      end
+      check.split_slack_channels.each do |channel|
+        (slack_channels[channel] ||= []) << check
       end
     end
 
@@ -165,6 +191,16 @@ module Blazer
         Blazer::CheckMailer.failing_checks(email, checks).deliver_now
       end
     end
+
+    slack_channels.each do |channel, checks|
+      Safely.safely do
+        Blazer::SlackNotifier.failing_checks(channel, checks)
+      end
+    end
+  end
+
+  def self.slack?
+    slack_webhook_url.present?
   end
 
   def self.adapters
@@ -185,3 +221,4 @@ Blazer.register_adapter "elasticsearch", Blazer::Adapters::ElasticsearchAdapter
 Blazer.register_adapter "presto", Blazer::Adapters::PrestoAdapter
 Blazer.register_adapter "mongodb", Blazer::Adapters::MongodbAdapter
 Blazer.register_adapter "sql", Blazer::Adapters::SqlAdapter
+Blazer.register_adapter "snowflake", Blazer::Adapters::SnowflakeAdapter

@@ -1,15 +1,12 @@
 module Blazer
   class QueriesController < BaseController
     before_action :set_query, only: [:show, :edit, :update, :destroy, :refresh]
+    before_action :set_data_source, only: [:tables, :docs, :schema, :cancel]
 
     def home
-      if params[:filter] == "dashboards"
-        @queries = []
-      else
-        set_queries(1000)
-      end
+      set_queries(1000)
 
-      if params[:filter] && params[:filter] != "dashboards"
+      if params[:filter]
         @dashboards = [] # TODO show my dashboards
       else
         @dashboards = Blazer::Dashboard.order(:name)
@@ -83,7 +80,10 @@ module Blazer
       data_source = @query.data_source if @query && @query.data_source
       @data_source = Blazer.data_sources[data_source]
 
-      if @run_id
+      # ensure viewable
+      if !(@query || Query.new(data_source: @data_source.id)).viewable?(blazer_user)
+        render_forbidden
+      elsif @run_id
         @timestamp = blazer_params[:timestamp].to_i
 
         @result = @data_source.run_results(@run_id)
@@ -113,14 +113,13 @@ module Blazer
 
         options = {user: blazer_user, query: @query, refresh_cache: params[:check], run_id: @run_id, async: Blazer.async}
         if Blazer.async && request.format.symbol != :csv
-          result = []
-          Blazer::RunStatementJob.perform_async(result, @data_source, @statement, options)
+          Blazer::RunStatementJob.perform_later(@data_source.id, @statement, options)
           wait_start = Time.now
           loop do
-            sleep(0.02)
-            break if result.any? || Time.now - wait_start > 3
+            sleep(0.1)
+            @result = @data_source.run_results(@run_id)
+            break if @result || Time.now - wait_start > 3
           end
-          @result = result.first
         else
           @result = Blazer::RunStatement.new.perform(@data_source, @statement, options)
         end
@@ -133,6 +132,13 @@ module Blazer
           @error = @result.error
           @cached_at = @result.cached_at
           @just_cached = @result.just_cached
+
+          @forecast = @query && @result.forecastable? && params[:forecast]
+          if @forecast
+            @result.forecast
+            @forecast_error = @result.forecast_error
+            @forecast = @forecast_error.nil?
+          end
 
           render_run
         else
@@ -174,19 +180,33 @@ module Blazer
     end
 
     def tables
-      render json: Blazer.data_sources[params[:data_source]].tables
+      render json: @data_source.tables
+    end
+
+    def docs
+      @smart_variables = @data_source.smart_variables
+      @linked_columns = @data_source.linked_columns
+      @smart_columns = @data_source.smart_columns
     end
 
     def schema
-      @schema = Blazer.data_sources[params[:data_source]].schema
+      @schema = @data_source.schema
     end
 
     def cancel
-      Blazer.data_sources[params[:data_source]].cancel(blazer_run_id)
+      @data_source.cancel(blazer_run_id)
       head :ok
     end
 
     private
+
+      def set_data_source
+        @data_source = Blazer.data_sources[params[:data_source]]
+
+        unless Query.new(data_source: @data_source.id).editable?(blazer_user)
+          render_forbidden
+        end
+      end
 
       def continue_run
         render json: {run_id: @run_id, timestamp: @timestamp}, status: :accepted
@@ -198,7 +218,7 @@ module Blazer
         @first_row = @rows.first || []
         @column_types = []
         if @rows.any?
-          @columns.each_with_index do |column, i|
+          @columns.each_with_index do |_, i|
             @column_types << (
               case @first_row[i]
               when Integer
@@ -248,13 +268,6 @@ module Blazer
       end
 
       def set_queries(limit = nil)
-        @my_queries =
-          if limit && blazer_user && !params[:filter] && Blazer.audit
-            queries_by_ids(Blazer::Audit.where(user_id: blazer_user.id).where("created_at > ?", 30.days.ago).where("query_id IS NOT NULL").group(:query_id).order("count_all desc").count.keys)
-          else
-            []
-          end
-
         @queries = Blazer::Query.named.select(:id, :name, :creator_id, :statement)
         @queries = @queries.includes(:creator) if Blazer.user_class
 
@@ -263,7 +276,6 @@ module Blazer
         elsif blazer_user && params[:filter] == "viewed" && Blazer.audit
           @queries = queries_by_ids(Blazer::Audit.where(user_id: blazer_user.id).order(created_at: :desc).limit(500).pluck(:query_id).uniq)
         else
-          @queries = @queries.where("id NOT IN (?)", @my_queries.map(&:id)) if @my_queries.any?
           @queries = @queries.limit(limit) if limit
           @queries = @queries.order(:name)
         end
@@ -271,7 +283,7 @@ module Blazer
 
         @more = limit && @queries.size >= limit
 
-        @queries = (@my_queries + @queries).select { |q| !q.name.to_s.start_with?("#") || q.try(:creator).try(:id) == blazer_user.try(:id) }
+        @queries = @queries.select { |q| !q.name.to_s.start_with?("#") || q.try(:creator).try(:id) == blazer_user.try(:id) }
 
         @queries =
           @queries.map do |q|
@@ -294,6 +306,14 @@ module Blazer
 
       def set_query
         @query = Blazer::Query.find(params[:id].to_s.split("-").first)
+
+        unless @query.viewable?(blazer_user)
+          render_forbidden
+        end
+      end
+
+      def render_forbidden
+        render plain: "Access denied", status: :forbidden
       end
 
       def query_params

@@ -6,7 +6,7 @@ Explore your data with SQL. Easily create charts and dashboards, and share them 
 
 [![Screenshot](https://blazer.dokkuapp.com/assets/screenshot-6ca3115a518b488026e48be83ba0d4c9.png)](https://blazer.dokkuapp.com)
 
-:envelope: [Get notified of updates](http://eepurl.com/cbUwsD)
+Blazer 2.0 was recently released! See [instructions for upgrading](#20).
 
 :tangerine: Battle-tested at [Instacart](https://www.instacart.com/opensource)
 
@@ -37,8 +37,8 @@ gem 'blazer'
 Run:
 
 ```sh
-rails g blazer:install
-rake db:migrate
+rails generate blazer:install
+rails db:migrate
 ```
 
 And mount the dashboard in your `config/routes.rb`:
@@ -53,7 +53,7 @@ For production, specify your database:
 ENV["BLAZER_DATABASE_URL"] = "postgres://user:password@hostname:5432/database"
 ```
 
-Blazer tries to protect against queries which modify data (by running each query in a transaction and rolling it back), but a safer approach is to use a read only user.  [See how to create one](#permissions).
+Blazer tries to protect against queries which modify data (by running each query in a transaction and rolling it back), but a safer approach is to use a read only user. [See how to create one](#permissions).
 
 #### Checks (optional)
 
@@ -86,7 +86,57 @@ Here’s what it looks like with cron.
 0   8 * * * rake blazer:send_failing_checks
 ```
 
+For Slack notifications, create an [incoming webhook](https://slack.com/apps/A0F7XDUAZ-incoming-webhooks) and set:
+
+```sh
+BLAZER_SLACK_WEBHOOK_URL=https://hooks.slack.com/...
+```
+
+Name the webhook “Blazer” and add a cool icon.
+
+## Authentication
+
+Don’t forget to protect the dashboard in production.
+
+### Basic Authentication
+
+Set the following variables in your environment or an initializer.
+
+```ruby
+ENV["BLAZER_USERNAME"] = "andrew"
+ENV["BLAZER_PASSWORD"] = "secret"
+```
+
+### Devise
+
+```ruby
+authenticate :user, ->(user) { user.admin? } do
+  mount Blazer::Engine, at: "blazer"
+end
+```
+
+### Other
+
+Specify a `before_action` method to run in `blazer.yml`.
+
+```yml
+before_action_method: require_admin
+```
+
+You can define this method in your `ApplicationController`.
+
+```ruby
+def require_admin
+  # depending on your auth, something like...
+  redirect_to root_path unless current_user && current_user.admin?
+end
+```
+
+Be sure to render or redirect for unauthorized users.
+
 ## Permissions
+
+Blazer runs each query in a transaction and rolls it back to prevent queries from modifying data. As an additional line of defense, we recommend using a read only user.
 
 ### PostgreSQL
 
@@ -121,45 +171,20 @@ db.createUser({user: "blazer", pwd: "password", roles: ["read"]})
 
 Also, make sure authorization is enabled when you start the server.
 
-### Sensitive Data
+## Sensitive Data
 
-To protect sensitive info like password hashes and access tokens, use views. Documentation coming soon.
+If your database contains sensitive or personal data, check out [Hypershield](https://github.com/ankane/hypershield) to shield it.
 
-## Authentication
+## Encrypted Data
 
-Don’t forget to protect the dashboard in production.
+If you need to search encrypted data, use [blind indexing](https://github.com/ankane/blind_index).
 
-### Basic Authentication
-
-Set the following variables in your environment or an initializer.
+You can have Blazer transform specific variables with: [master]
 
 ```ruby
-ENV["BLAZER_USERNAME"] = "andrew"
-ENV["BLAZER_PASSWORD"] = "secret"
-```
-
-### Devise
-
-```ruby
-authenticate :user, -> (user) { user.admin? } do
-  mount Blazer::Engine, at: "blazer"
-end
-```
-
-### Other
-
-Specify a `before_action` method to run in `blazer.yml`.
-
-```yml
-before_action: require_admin
-```
-
-Then define the custom authentication method in your `application_controller.rb`.
-
-```ruby
-def require_admin
-  # depending on your auth, maybe something like...
-  current_user && current_user.admin?
+Blazer.transform_variable = lambda do |name, value|
+  value = User.compute_email_bidx(value) if name == "email_bidx"
+  value
 end
 ```
 
@@ -217,7 +242,7 @@ Link results to other pages in your apps or around the web. Specify a column nam
 ```yml
 linked_columns:
   user_id: "/admin/users/{value}"
-  ip_address: "http://www.infosniper.net/index.php?ip_address={value}"
+  ip_address: "https://www.infosniper.net/index.php?ip_address={value}"
 ```
 
 ### Smart Columns
@@ -306,10 +331,18 @@ SELECT gender, zip_code, COUNT(*) FROM users GROUP BY 1, 2
 
 ### Scatter Chart
 
-2 columns - both numeric
+2 columns - both numeric - [Example](https://blazer.dokkuapp.com/queries/16-scatter-chart)
 
 ```sql
 SELECT x, y FROM table
+```
+
+### Pie Chart
+
+2 columns - string, numeric - and last column named `pie` - [Example](https://blazer.dokkuapp.com/queries/17-pie-chart)
+
+```sql
+SELECT gender, COUNT(*) AS pie FROM users GROUP BY 1
 ```
 
 ### Maps
@@ -352,24 +385,64 @@ Then create check with optional emails if you want to be notified. Emails are se
 
 ## Anomaly Detection
 
-Anomaly detection is supported thanks to Twitter’s [AnomalyDetection](https://github.com/twitter/AnomalyDetection) library.
+Blazer supports two different approaches to anomaly detection.
 
-First, [install R](https://cloud.r-project.org/). Then, run:
+### Trend
 
-```R
-install.packages("devtools")
-devtools::install_github("twitter/AnomalyDetection")
+[Trend](https://trendapi.org/) is easiest to set up but uses an external service.
+
+Add [trend](https://github.com/ankane/trend) to your Gemfile:
+
+```ruby
+gem 'trend'
 ```
 
 And add to `config/blazer.yml`:
 
 ```yml
-anomaly_checks: true
+anomaly_checks: trend
+```
+
+### R
+
+R is harder to set up but doesn’t use an external service. It uses Twitter’s [AnomalyDetection](https://github.com/twitter/AnomalyDetection) library.
+
+First, [install R](https://cloud.r-project.org/). Then, run:
+
+```R
+install.packages("remotes")
+remotes::install_github("twitter/AnomalyDetection")
+```
+
+And add to `config/blazer.yml`:
+
+```yml
+anomaly_checks: r
 ```
 
 If upgrading from version 1.4 or below, also follow the [upgrade instructions](#15).
 
 If you’re on Heroku, follow [these additional instructions](#anomaly-detection-on-heroku).
+
+## Forecasting
+
+Blazer has experimental support for forecasting through [Trend](https://trendapi.org/).
+
+[Example](https://blazer.dokkuapp.com/queries/18-forecast?forecast=t)
+
+Add [trend](https://github.com/ankane/trend) to your Gemfile:
+
+```ruby
+gem 'trend'
+```
+
+And add to `config/blazer.yml`:
+
+```yml
+forecasting: trend
+```
+
+A forecast link will appear for queries that return 2 columns with types timestamp and numeric.
 
 ## Data Sources
 
@@ -392,21 +465,22 @@ data_sources:
 
 ### Full List
 
-- [PostgreSQL](#postgresql-1)
-- [MySQL](#mysql-1)
-- [SQL Server](#sql-server)
-- [Oracle](#oracle)
-- [IBM DB2 and Informix](#ibm-db2-and-informix)
-- [SQLite](#sqlite)
-- [Amazon Redshift](#amazon-redshift)
 - [Amazon Athena](#amazon-athena)
-- [Presto](#presto)
+- [Amazon Redshift](#amazon-redshift)
 - [Apache Drill](#apache-drill)
-- [Google BigQuery](#google-bigquery)
-- [MongoDB](#mongodb-1)
-- [Cassandra](#cassandra) [master]
+- [Cassandra](#cassandra)
 - [Druid](#druid)
-- [Elasticsearch](#elasticsearch-beta) [beta]
+- [Elasticsearch](#elasticsearch)
+- [Google BigQuery](#google-bigquery)
+- [IBM DB2 and Informix](#ibm-db2-and-informix)
+- [MongoDB](#mongodb-1)
+- [MySQL](#mysql-1)
+- [Oracle](#oracle)
+- [PostgreSQL](#postgresql-1)
+- [Presto](#presto)
+- [Snowflake](#snowflake)
+- [SQLite](#sqlite)
+- [SQL Server](#sql-server)
 
 You can also [create an adapter](#creating-an-adapter) for any other data store.
 
@@ -418,52 +492,16 @@ data_sources:
     url: <%= ENV["BLAZER_MY_SOURCE_URL"] %>
 ```
 
-### PostgreSQL
+### Amazon Athena
 
-Add [pg](https://bitbucket.org/ged/ruby-pg/wiki/Home) to your Gemfile (if it’s not there) and set:
-
-```yml
-data_sources:
-  my_source:
-    url: postgres://user:password@hostname:5432/database
-```
-
-### MySQL
-
-Add [mysql2](https://github.com/brianmario/mysql2) to your Gemfile (if it’s not there) and set:
+Add [aws-sdk-athena](https://github.com/aws/aws-sdk-ruby) and [aws-sdk-glue](https://github.com/aws/aws-sdk-ruby) to your Gemfile and set:
 
 ```yml
 data_sources:
   my_source:
-    url: mysql2://user:password@hostname:3306/database
-```
-
-### SQL Server
-
-Add [tiny_tds](https://github.com/rails-sqlserver/tiny_tds) and [activerecord-sqlserver-adapter](https://github.com/rails-sqlserver/activerecord-sqlserver-adapter) to your Gemfile and set:
-
-```yml
-data_sources:
-  my_source:
-    url: sqlserver://user:password@hostname:1433/database
-```
-
-### Oracle
-
-Use [activerecord-oracle_enhanced-adapter](https://github.com/rsim/oracle-enhanced).
-
-### IBM DB2 and Informix
-
-Use [ibm_db](https://github.com/ibmdb/ruby-ibmdb).
-
-### SQLite
-
-Add [sqlite3](https://github.com/sparklemotion/sqlite3-ruby) to your Gemfile and set:
-
-```yml
-data_sources:
-  my_source:
-    url: sqlite3:path/to/database.sqlite3
+    adapter: athena
+    database: database
+    output_location: s3://some-bucket/
 ```
 
 ### Amazon Redshift
@@ -476,28 +514,6 @@ data_sources:
     url: redshift://user:password@hostname:5439/database
 ```
 
-### Amazon Athena
-
-Add [aws-sdk](https://github.com/aws/aws-sdk-ruby) `~> 2` to your Gemfile and set:
-
-```yml
-data_sources:
-  my_source:
-    adapter: athena
-    database: database
-    output_location: s3://some-bucket/
-```
-
-### Presto
-
-Add [presto-client](https://github.com/treasure-data/presto-client-ruby) to your Gemfile and set:
-
-```yml
-data_sources:
-  my_source:
-    url: presto://user@hostname:8080/catalog
-```
-
 ### Apache Drill
 
 Add [drill-sergeant](https://github.com/ankane/drill-sergeant) to your Gemfile and set:
@@ -507,28 +523,6 @@ data_sources:
   my_source:
     adapter: drill
     url: http://hostname:8047
-```
-
-### Google BigQuery
-
-Add [google-cloud-bigquery](https://github.com/GoogleCloudPlatform/google-cloud-ruby/tree/master/google-cloud-bigquery) to your Gemfile and set:
-
-```yml
-data_sources:
-  my_source:
-    adapter: bigquery
-    project: your-project
-    keyfile: path/to/keyfile.json
-```
-
-### MongoDB
-
-Add [mongo](https://github.com/mongodb/mongo-ruby-driver) to your Gemfile and set:
-
-```yml
-data_sources:
-  my_source:
-    url: mongodb://user:password@hostname:27017/database
 ```
 
 ### Cassandra
@@ -554,15 +548,106 @@ data_sources:
     url: http://hostname:8082
 ```
 
-### Elasticsearch [beta]
+### Elasticsearch
 
-Add [elasticsearch](https://github.com/elastic/elasticsearch-ruby) to your Gemfile and set:
+Add [elasticsearch](https://github.com/elastic/elasticsearch-ruby) and [elasticsearch-xpack](https://github.com/elastic/elasticsearch-ruby/tree/master/elasticsearch-xpack) to your Gemfile and set:
 
 ```yml
 data_sources:
   my_source:
     adapter: elasticsearch
     url: http://user:password@hostname:9200
+```
+
+### Google BigQuery
+
+Add [google-cloud-bigquery](https://github.com/GoogleCloudPlatform/google-cloud-ruby/tree/master/google-cloud-bigquery) to your Gemfile and set:
+
+```yml
+data_sources:
+  my_source:
+    adapter: bigquery
+    project: your-project
+    keyfile: path/to/keyfile.json
+```
+
+### IBM DB2 and Informix
+
+Use [ibm_db](https://github.com/ibmdb/ruby-ibmdb).
+
+### MongoDB
+
+Add [mongo](https://github.com/mongodb/mongo-ruby-driver) to your Gemfile and set:
+
+```yml
+data_sources:
+  my_source:
+    url: mongodb://user:password@hostname:27017/database
+```
+
+### MySQL
+
+Add [mysql2](https://github.com/brianmario/mysql2) to your Gemfile (if it’s not there) and set:
+
+```yml
+data_sources:
+  my_source:
+    url: mysql2://user:password@hostname:3306/database
+```
+
+### Oracle
+
+Use [activerecord-oracle_enhanced-adapter](https://github.com/rsim/oracle-enhanced).
+
+### PostgreSQL
+
+Add [pg](https://bitbucket.org/ged/ruby-pg/wiki/Home) to your Gemfile (if it’s not there) and set:
+
+```yml
+data_sources:
+  my_source:
+    url: postgres://user:password@hostname:5432/database
+```
+
+### Presto
+
+Add [presto-client](https://github.com/treasure-data/presto-client-ruby) to your Gemfile and set:
+
+```yml
+data_sources:
+  my_source:
+    url: presto://user@hostname:8080/catalog
+```
+
+### Snowflake
+
+First, install the [ODBC driver](https://docs.snowflake.net/manuals/user-guide/odbc.html). Add [odbc_adapter](https://github.com/localytics/odbc_adapter) to your Gemfile and set:
+
+```yml
+data_sources:
+  my_source:
+    adapter: snowflake
+    dsn: ProductionSnowflake
+```
+
+### SQLite
+
+Add [sqlite3](https://github.com/sparklemotion/sqlite3-ruby) to your Gemfile and set:
+
+```yml
+data_sources:
+  my_source:
+    url: sqlite3:path/to/database.sqlite3
+```
+
+### SQL Server
+
+Add [tiny_tds](https://github.com/rails-sqlserver/tiny_tds) and [activerecord-sqlserver-adapter](https://github.com/rails-sqlserver/activerecord-sqlserver-adapter) to your Gemfile and set:
+
+```yml
+data_sources:
+  my_source:
+    url: sqlserver://user:password@hostname:1433/database
 ```
 
 ## Creating an Adapter
@@ -605,6 +690,24 @@ Have team members who want to learn SQL? Here are a few great, free resources.
 
 For an easy way to group by day, week, month, and more with correct time zones, check out [Groupdate](https://github.com/ankane/groupdate.sql).
 
+## Standalone Version
+
+Looking for a standalone version? Check out [Ghost Blazer](https://github.com/buren/ghost_blazer).
+
+## Performance
+
+By default, queries take up a request while they are running. To run queries asynchronously, add to your config:
+
+```yml
+async: true
+```
+
+**Note:** Requires Rails 5+ and caching to be enabled. If you have multiple web processes, your app must use a centralized cache store like Memcached or Redis.
+
+```ruby
+config.cache_store = :mem_cache_store
+```
+
 ## Anomaly Detection on Heroku
 
 Add the [R buildpack](https://github.com/virtualstaticvoid/heroku-buildpack-r) to your app.
@@ -624,7 +727,29 @@ if (!"AnomalyDetection" %in% installed.packages()) {
 
 Commit and deploy away. The first deploy may take a few minutes.
 
+## Content Security Policy
+
+If views are stuck with a `Loading...` message, there might be a problem with strict CSP settings in your app. This can be checked with Firefox or Chrome dev tools. You can allow Blazer to override these settings for its controllers with:
+
+```yml
+override_csp: true
+```
+
 ## Upgrading
+
+### 2.0
+
+To use Slack notifications, create a migration
+
+```sh
+rails g migration add_slack_channels_to_blazer_checks
+```
+
+with:
+
+```ruby
+add_column :blazer_checks, :slack_channels, :text
+```
 
 ### 1.5
 
@@ -637,8 +762,8 @@ rails g migration upgrade_blazer_to_1_5
 with:
 
 ```ruby
-add_column(:blazer_checks, :check_type, :string)
-add_column(:blazer_checks, :message, :text)
+add_column :blazer_checks, :check_type, :string
+add_column :blazer_checks, :message, :text
 commit_db_transaction
 
 Blazer::Check.reset_column_information
@@ -717,7 +842,7 @@ end
 And run:
 
 ```sh
-rake db:migrate
+rails db:migrate
 ```
 
 Update `config/blazer.yml` with:
@@ -772,12 +897,6 @@ audit: true
 # from_email: blazer@example.org
 ```
 
-## TODO
-
-- advanced permissions
-- standalone version
-- better navigation
-
 ## History
 
 View the [changelog](https://github.com/ankane/blazer/blob/master/CHANGELOG.md)
@@ -786,7 +905,7 @@ View the [changelog](https://github.com/ankane/blazer/blob/master/CHANGELOG.md)
 
 Blazer uses a number of awesome open source projects, including [Rails](https://github.com/rails/rails/), [Vue.js](https://github.com/vuejs/vue), [jQuery](https://github.com/jquery/jquery), [Bootstrap](https://github.com/twbs/bootstrap), [Selectize](https://github.com/brianreavis/selectize.js), [StickyTableHeaders](https://github.com/jmosbech/StickyTableHeaders), [Stupid jQuery Table Sort](https://github.com/joequery/Stupid-Table-Plugin), and [Date Range Picker](https://github.com/dangrossman/bootstrap-daterangepicker).
 
-Demo data from [MovieLens](http://grouplens.org/datasets/movielens/).
+Demo data from [MovieLens](https://grouplens.org/datasets/movielens/).
 
 ## Want to Make Blazer Better?
 

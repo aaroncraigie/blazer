@@ -7,7 +7,7 @@ module Blazer
       skip_after_action(*filters, raise: false)
       skip_around_action(*filters, raise: false)
     else
-      skip_action_callback *filters
+      skip_action_callback(*filters)
     end
 
     protect_from_forgery with: :exception
@@ -16,8 +16,18 @@ module Blazer
       http_basic_authenticate_with name: ENV["BLAZER_USERNAME"], password: ENV["BLAZER_PASSWORD"]
     end
 
+    if Blazer.settings["before_action"]
+      raise Blazer::Error, "The docs for protecting Blazer with a custom before_action had an incorrect example from August 2017 to June 2018. The example method had a boolean return value. However, you must render or redirect if a user is unauthorized rather than return a falsy value. Double check that your before_action works correctly for unauthorized users (if it worked when added, there should be no issue). Then, change before_action to before_action_method in config/blazer.yml."
+    end
+
     if Blazer.before_action
       before_action Blazer.before_action.to_sym
+    end
+
+    if Blazer.override_csp
+      after_action do
+        response.headers['Content-Security-Policy'] = "default-src 'self' https: 'unsafe-inline' 'unsafe-eval' data:"
+      end
     end
 
     layout "blazer/application"
@@ -53,6 +63,7 @@ module Blazer
                 value = value.to_f
               end
             end
+            value = Blazer.transform_variable.call(var, value) if Blazer.transform_variable
             statement.gsub!("{#{var}}", ActiveRecord::Base.connection.quote(value))
           end
         end
@@ -85,7 +96,7 @@ module Blazer
       helper_method :variable_params
 
       def blazer_user
-        send(Blazer.user_method) if Blazer.user_method && respond_to?(Blazer.user_method)
+        send(Blazer.user_method) if Blazer.user_method && respond_to?(Blazer.user_method, true)
       end
       helper_method :blazer_user
 

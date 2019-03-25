@@ -1,4 +1,39 @@
-## 1.8.2 [unreleased]
+## 2.0.2 [unreleased]
+
+- Added support for variable transformation for blind indexing
+- Fixed JavaScript sorting for numbers with commas
+
+## 2.0.1
+
+- Added favicon
+- Added search for checks and schema
+- Added pie charts
+- Added Trend anomaly detection
+- Added forecasting
+- Improved tooltips
+- Improved docs for new installs
+- Fixed error with canceling queries
+
+## 2.0.0
+
+- Added support for Slack
+- Added `async` option
+- Added `override_csp` option
+- Added smart variables, linked columns smart columns, and charts to inline docs
+- Use SQL for Elasticsearch
+- Fixed error with latest `google-cloud-bigquery`
+
+Breaking changes
+
+- Dropped support for Rails < 4.2
+
+## 1.9.0
+
+- Prompt developers to check custom `before_action`
+- Better ordering on home page
+- Added support for Snowflake
+
+## 1.8.2
 
 - Added support for Cassandra
 - Fixes for Druid

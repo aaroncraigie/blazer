@@ -90,7 +90,6 @@ module Blazer
     end
 
     def run_statement(statement, options = {})
-      run_id = options[:run_id]
       async = options[:async]
       result = nil
       if cache_mode != "off"
@@ -145,7 +144,7 @@ module Blazer
 
     def adapter_instance
       @adapter_instance ||= begin
-        unless settings["url"] || Rails.env.development? || ["bigquery", "athena"].include?(settings["adapter"])
+        unless settings["url"] || Rails.env.development? || ["bigquery", "athena", "snowflake"].include?(settings["adapter"])
           raise Blazer::Error, "Empty url for data source: #{id}"
         end
 

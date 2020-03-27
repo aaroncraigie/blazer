@@ -32,7 +32,7 @@ module Blazer
               query_execution_id: query_execution_id
             )
           rescue Aws::Athena::Errors::InvalidRequestException => e
-            if e.message != "Query has not yet finished. Current state: RUNNING"
+            unless e.message.start_with?("Query has not yet finished.")
               raise e
             end
             if Time.now < stop_at
@@ -56,6 +56,7 @@ module Blazer
             utc = ActiveSupport::TimeZone['Etc/UTC']
 
             rows = untyped_rows[1..-1] || []
+            rows = untyped_rows[0..-1] unless column_info.present?
             column_types.each_with_index do |ct, i|
               # TODO more column_types
               case ct

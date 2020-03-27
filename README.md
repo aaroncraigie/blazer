@@ -353,7 +353,7 @@ Columns named `latitude` and `longitude` or `lat` and `lon` or `lat` and `lng` -
 SELECT name, latitude, longitude FROM cities
 ```
 
-To enable, get an access token from [Mapbox](https://www.mapbox.com/) and set `ENV["MAPBOX_ACCESS_TOKEN"]`.
+To enable, get an access token from [Mapbox](https://www.mapbox.com/) and set `ENV["MAPBOX_ACCESS_TOKEN"]`, or [MapQuest](https://developer.mapquest.com/) and set `ENV["MAPQUEST_ACCESS_TOKEN"]`
 
 ### Targets
 
